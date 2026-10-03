@@ -11,8 +11,10 @@
     --glass-shadow:0 6px 26px rgba(15,23,42,.09), 0 1px 3px rgba(15,23,42,.05);
   }
   @media (prefers-color-scheme: dark){
+    /* 暗色下四档绿色整体提亮：原来 1/2 档（#0e4429 / #006d32）压在深灰底上
+       几乎看不出有色，实测 62 个有色格子里 38 个落在最暗两档。 */
     :root{ --bg:#16181c; --card:#242629; --line:#34383d; --text:#e8eaed; --dim:#9aa0a6;
-           --l0:#2d3134; --l1:#0e4429; --l2:#006d32; --l3:#26a641; --l4:#39d353;
+           --l0:#2d3134; --l1:#1a5c38; --l2:#238040; --l3:#35b953; --l4:#4ade63;
            --glass:rgba(38,41,46,.55); --glass-strong:rgba(44,47,53,.78);
            --glass-line:rgba(255,255,255,.08); --glass-stroke:rgba(255,255,255,.10);
            --glass-shadow:0 8px 30px rgba(0,0,0,.42), 0 1px 3px rgba(0,0,0,.3); }
@@ -60,9 +62,12 @@
   .stat .v{font-size:22px;font-weight:660;letter-spacing:-.4px;margin-top:2px}
   .stat .v small{font-size:13px;font-weight:500;color:var(--dim);margin-left:3px}
   .gridbox{overflow-x:auto;padding-bottom:2px}
-  .months{display:flex;gap:4px;margin:0 0 5px 31px;height:14px}
-  .months span{font-size:11px;color:var(--dim);white-space:nowrap;overflow:visible}
-  .gridrow{display:flex;gap:3px;align-items:flex-start}
+  /* 月份轴：绝对定位，每个标签的 left = 列索引 × 17px（13 格子 + 4 间隙），
+     和格子的几何完全一致。以前是一排 span（宽 14px、有文字的改 auto）+ gap:4px，
+     每个单元 18px 而格子是 17px，53 列累计漂 53px，到 9 月能偏出 5 个格子。 */
+  .months{position:relative;height:14px;margin:0 0 5px 27px}
+  .months span{position:absolute;top:0;font-size:11px;color:var(--dim);white-space:nowrap}
+  .gridrow{display:flex;align-items:flex-start}
   .wd{display:flex;flex-direction:column;gap:4px;width:27px;flex:0 0 27px}
   .wd span{height:13px;font-size:10px;color:var(--dim);line-height:13px}
   .cols{display:flex;gap:4px}

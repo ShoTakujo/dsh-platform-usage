@@ -88,21 +88,22 @@ function render(){
   const mode = state.mode;
   const scaleMax = mode==='cumulative' ? acc : null;
 
-  // month labels
+  // 月份轴：绝对定位到对应列上（左侧留出星期列 27px）
   const months = document.getElementById('months');
+  const CSTEP = 17;                       // 13px 格子 + 4px 间隙
   months.innerHTML='';
   let prevM=null, lastLabelWeek=-99;
   weeks.forEach((w,i)=>{
     const m = w[0].dt.getMonth();
-    const s=document.createElement('span'); s.style.width='14px';
-    // label a month only when its first column is far enough from the last label
+    // 离上一个标签不足 3 列就不标，免得挤在一起
     if(m!==prevM && i<52 && (i-lastLabelWeek)>=3){
+      const s=document.createElement('span');
       s.textContent = (prevM===null ? w[0].dt.getFullYear()+'年' : '') + (m+1)+'月';
-      s.style.width='auto'; s.style.marginRight='-2px';
-      s.style.position='relative'; s.style.zIndex=1;
+      s.style.left = (i*CSTEP) + 'px';
+      months.appendChild(s);
       lastLabelWeek=i;
-    } else s.textContent='';
-    prevM=m; months.appendChild(s);
+    }
+    prevM=m;
   });
 
   // cells
