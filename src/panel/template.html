@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepSeek 用量 · Token 活动</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --card:#ffffff; --line:#e8e6e1; --text:#1f2328; --dim:#6b7280;
+    --l0:#ebedf0; --l1:#c6e48b; --l2:#7bc96f; --l3:#239a3b; --l4:#196127;
+    --accent:#4d6bfe;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#1b1d1f; --card:#242629; --line:#34383d; --text:#e8eaed; --dim:#9aa0a6;
+           --l0:#2d3134; --l1:#0e4429; --l2:#006d32; --l3:#26a641; --l4:#39d353; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 60px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+  h1{font-size:19px;font-weight:650;margin:0}
+  .headRight{display:flex;align-items:center;gap:10px}
+  .sub{color:var(--dim);font-size:12.5px}
+  .sub b{color:var(--text);font-weight:600}
+  /* 视图切换 + 刷新 = 同一个胶囊：外框只有一层，靠分隔线分区 */
+  .modes{display:flex;align-items:center;gap:2px;background:var(--card);border:1px solid var(--line);
+         border-radius:9px;padding:3px}
+  .modes button{border:0;background:transparent;color:var(--dim);font:inherit;font-size:13px;
+                padding:5px 14px;border-radius:7px;cursor:pointer}
+  .modes button.on{background:var(--accent);color:#fff}
+  /* 只留图标的刷新键 */
+  .modes .refresh{display:inline-flex;align-items:center;justify-content:center;
+                  padding:5px 10px;margin-right:3px;color:var(--dim);
+                  border-right:1px solid var(--line);border-radius:7px 0 0 7px;
+                  transition:color .15s ease,background .15s ease,transform .12s ease}
+  .modes .refresh svg{display:block}
+  .modes .refresh:hover{color:var(--text);background:rgba(127,127,127,.08)}
+  .modes .refresh:active{transform:scale(.92)}
+  .modes .refresh[disabled]{opacity:.6;cursor:default}
+  .modes .refresh.busy svg{animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes errPulse{0%,100%{transform:translateX(0)}25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
+  .modes .refresh.err{color:#d92d20;animation:errPulse .32s ease 2}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 18px 14px;margin-top:16px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+  .stat .k{color:var(--dim);font-size:12px}
+  .stat .v{font-size:22px;font-weight:660;letter-spacing:-.4px;margin-top:2px}
+  .stat .v small{font-size:13px;font-weight:500;color:var(--dim);margin-left:3px}
+  .gridbox{overflow-x:auto;padding-bottom:2px}
+  .months{display:flex;gap:4px;margin:0 0 5px 31px;height:14px}
+  .months span{font-size:11px;color:var(--dim);white-space:nowrap;overflow:visible}
+  .gridrow{display:flex;gap:3px;align-items:flex-start}
+  .wd{display:flex;flex-direction:column;gap:4px;width:27px;flex:0 0 27px}
+  .wd span{height:13px;font-size:10px;color:var(--dim);line-height:13px}
+  .cols{display:flex;gap:4px}
+  .col{display:flex;flex-direction:column;gap:4px}
+  .c{width:13px;height:13px;border-radius:3px;background:var(--l0)}
+  .c[data-tip]{cursor:pointer}
+  .c.l1{background:var(--l1)} .c.l2{background:var(--l2)} .c.l3{background:var(--l3)} .c.l4{background:var(--l4)}
+  .legend{display:flex;align-items:center;gap:5px;justify-content:flex-end;color:var(--dim);font-size:11.5px;margin-top:10px}
+  .legend i{width:13px;height:13px;border-radius:3px;display:inline-block}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--dim);font-weight:500;font-size:12px}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  .bar{height:7px;border-radius:4px;background:var(--accent);opacity:.75;display:inline-block;vertical-align:middle}
+  .two{display:grid;grid-template-columns:1fr;gap:16px}
+  @media(min-width:900px){.two{grid-template-columns:1.45fr 1fr}}
+  h2{font-size:14px;font-weight:600;margin:0 0 10px}
+  #tip{position:fixed;z-index:99;pointer-events:none;background:#111;color:#fff;font-size:12px;
+       padding:7px 10px;border-radius:8px;opacity:0;transition:opacity .1s;max-width:300px;line-height:1.5}
+  #tip.on{opacity:.95}
+  .note{color:var(--dim);font-size:12px;margin-top:12px}
+  .note code{background:rgba(127,127,127,.14);padding:1px 5px;border-radius:4px}
+
+  /* ---------- 动效（对标 Codex：草地逐列生长 + 数字滚动） ---------- */
+  @keyframes cellIn{
+    0%  {transform:scale(.35) translateY(3px);opacity:0;filter:brightness(1.7)}
+    55% {transform:scale(1.1)  translateY(0);  opacity:1;filter:brightness(1.22)}
+    100%{transform:scale(1)    translateY(0);  opacity:1;filter:brightness(1)}
+  }
+  .cols.animate .c{animation:cellIn .46s cubic-bezier(.22,.72,.28,1.02) both}
+  .cols.animate .col:nth-child(1) .c{animation-delay:0s}
+  .cols.animate .col:nth-child(2) .c{animation-delay:.022s}
+  .cols.animate .col:nth-child(3) .c{animation-delay:.044s}
+  .cols.animate .col:nth-child(4) .c{animation-delay:.066s}
+  .cols.animate .col:nth-child(5) .c{animation-delay:.088s}
+  .cols.animate .col:nth-child(6) .c{animation-delay:.11s}
+  .cols.animate .col:nth-child(7) .c{animation-delay:.132s}
+  .cols.animate .col:nth-child(8) .c{animation-delay:.154s}
+  .cols.animate .col:nth-child(9) .c{animation-delay:.176s}
+  .cols.animate .col:nth-child(10) .c{animation-delay:.198s}
+  .cols.animate .col:nth-child(11) .c{animation-delay:.22s}
+  .cols.animate .col:nth-child(12) .c{animation-delay:.242s}
+  .cols.animate .col:nth-child(13) .c{animation-delay:.264s}
+  .cols.animate .col:nth-child(14) .c{animation-delay:.286s}
+  .cols.animate .col:nth-child(15) .c{animation-delay:.308s}
+  .cols.animate .col:nth-child(16) .c{animation-delay:.33s}
+  .cols.animate .col:nth-child(17) .c{animation-delay:.352s}
+  .cols.animate .col:nth-child(18) .c{animation-delay:.374s}
+  .cols.animate .col:nth-child(19) .c{animation-delay:.396s}
+  .cols.animate .col:nth-child(20) .c{animation-delay:.418s}
+  .cols.animate .col:nth-child(21) .c{animation-delay:.44s}
+  .cols.animate .col:nth-child(22) .c{animation-delay:.462s}
+  .cols.animate .col:nth-child(23) .c{animation-delay:.484s}
+  .cols.animate .col:nth-child(24) .c{animation-delay:.506s}
+  .cols.animate .col:nth-child(25) .c{animation-delay:.528s}
+  .cols.animate .col:nth-child(26) .c{animation-delay:.55s}
+  .cols.animate .col:nth-child(27) .c{animation-delay:.572s}
+  .cols.animate .col:nth-child(28) .c{animation-delay:.594s}
+  .cols.animate .col:nth-child(29) .c{animation-delay:.616s}
+  .cols.animate .col:nth-child(30) .c{animation-delay:.638s}
+  .cols.animate .col:nth-child(31) .c{animation-delay:.66s}
+  .cols.animate .col:nth-child(32) .c{animation-delay:.682s}
+  .cols.animate .col:nth-child(33) .c{animation-delay:.704s}
+  .cols.animate .col:nth-child(34) .c{animation-delay:.726s}
+  .cols.animate .col:nth-child(35) .c{animation-delay:.748s}
+  .cols.animate .col:nth-child(36) .c{animation-delay:.77s}
+  .cols.animate .col:nth-child(37) .c{animation-delay:.792s}
+  .cols.animate .col:nth-child(38) .c{animation-delay:.814s}
+  .cols.animate .col:nth-child(39) .c{animation-delay:.836s}
+  .cols.animate .col:nth-child(40) .c{animation-delay:.858s}
+  .cols.animate .col:nth-child(41) .c{animation-delay:.88s}
+  .cols.animate .col:nth-child(42) .c{animation-delay:.902s}
+  .cols.animate .col:nth-child(43) .c{animation-delay:.924s}
+  .cols.animate .col:nth-child(44) .c{animation-delay:.946s}
+  .cols.animate .col:nth-child(45) .c{animation-delay:.968s}
+  .cols.animate .col:nth-child(46) .c{animation-delay:.99s}
+  .cols.animate .col:nth-child(47) .c{animation-delay:1.012s}
+  .cols.animate .col:nth-child(48) .c{animation-delay:1.034s}
+  .cols.animate .col:nth-child(49) .c{animation-delay:1.056s}
+  .cols.animate .col:nth-child(50) .c{animation-delay:1.078s}
+  .cols.animate .col:nth-child(51) .c{animation-delay:1.1s}
+  .cols.animate .col:nth-child(52) .c{animation-delay:1.122s}
+  .cols.animate .col:nth-child(53) .c{animation-delay:1.144s}
+
+  .c{transition:transform .12s ease,box-shadow .12s ease}
+  .c:hover{transform:scale(1.55);box-shadow:0 0 0 1.5px var(--card),0 1px 5px rgba(0,0,0,.18);position:relative;z-index:3}
+  .c:active{transform:scale(1.25)}
+
+  @keyframes statIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+  .stat{animation:statIn .42s ease both}
+  .stat:nth-child(1){animation-delay:.02s} .stat:nth-child(2){animation-delay:.06s}
+  .stat:nth-child(3){animation-delay:.1s}  .stat:nth-child(4){animation-delay:.14s}
+  .stat:nth-child(5){animation-delay:.18s} .stat:nth-child(6){animation-delay:.22s}
+  .stat .v{font-variant-numeric:tabular-nums}
+
+  @keyframes rowIn{from{opacity:0;transform:translateX(-7px)}to{opacity:1;transform:none}}
+  tbody tr{animation:rowIn .38s ease both}
+  tbody tr:nth-child(1){animation-delay:.04s} tbody tr:nth-child(2){animation-delay:.09s}
+  tbody tr:nth-child(3){animation-delay:.14s} tbody tr:nth-child(4){animation-delay:.19s}
+  tbody tr:nth-child(5){animation-delay:.24s} tbody tr:nth-child(6){animation-delay:.29s}
+  tbody tr:nth-child(7){animation-delay:.34s} tbody tr:nth-child(8){animation-delay:.39s}
+  .bar{transform-origin:left center;animation:barIn .75s cubic-bezier(.2,.8,.25,1) both}
+  @keyframes barIn{from{transform:scaleX(0);opacity:.25}to{transform:scaleX(1);opacity:.75}}
+
+  .modes button{transition:background .18s ease,color .18s ease,transform .12s ease}
+  .modes button.on{animation:pill .28s ease}
+  @keyframes pill{0%{transform:scale(.93)}60%{transform:scale(1.035)}100%{transform:scale(1)}}
+  @keyframes tipIn{from{opacity:0;transform:translateY(4px) scale(.97)}to{opacity:.96;transform:none}}
+  #tip.on{opacity:.96;animation:tipIn .13s ease}
+  .card{transition:box-shadow .2s ease}
+
+  @media (prefers-reduced-motion: reduce){
+    .cols.animate .c,.stat,tbody tr,.bar,#tip.on,.modes button.on{animation:none !important}
+    .c:hover{transform:none}
+  }
+</style>
+</head>
+<body>
+<div id="official-usage-root" class="ou-root"><div class="wrap">
+  <header>
+    <div>
+      <h1>Token 活动</h1>
+    </div>
+    <div class="headRight">
+      <div class="modes" id="modes">
+        <button id="refresh" class="refresh" title="刷新" aria-label="刷新">
+          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M13.5 8a5.5 5.5 0 1 1-1.9-4.15M13.6 1.6v3.1h-3.1"/></svg>
+        </button>
+        <button data-m="daily" class="on">每天</button>
+        <button data-m="weekly">每周</button>
+        <button data-m="cumulative">累计总量</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="card">
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="card">
+    <div class="gridbox">
+      <div class="months" id="months"></div>
+      <div class="gridrow">
+        <div class="wd"><span>一</span><span></span><span>三</span><span></span><span>五</span><span></span><span>日</span></div>
+        <div class="cols" id="cols"></div>
+      </div>
+    </div>
+    <div class="legend">
+      <span id="lgL">少</span><i style="background:var(--l0)"></i><i style="background:var(--l1)"></i>
+      <i style="background:var(--l2)"></i><i style="background:var(--l3)"></i><i style="background:var(--l4)"></i>
+      <span id="lgR">多</span>
+    </div>
+  </div>
+
+  <div class="two">
+    <div class="card"><h2>按 API Key</h2><div id="bykey"></div></div>
+    <div class="card"><h2>按模型</h2><div id="bymodel"></div></div>
+  </div>
+</div>
+</div>
+<div id="tip"></div>
+<script id="payload" type="application/json">__PAYLOAD_JSON__</script>
+<script>
+/* 数据来源：
+   · 独立文件模式 —— 上方 <script type="application/json"> 里烤好的数据
+   · 插件模式    —— 宿主给 window.__OFFICIAL_USAGE_DATA__（下一行就是消费点）
+   ⚠️ 插件模式下这一步绝不能碰 DOM：后面的交互绑定依赖完整 DOM，
+      早期版本在这里写了一句“暂无数据”把 .wrap 换掉，直接让脚本崩在
+      getElementById('modes') === null 上。 */
+var __OU_PLUGIN__ = (typeof __OU_PLUGIN__ !== 'undefined');
+var __OU_DATA__ = null;
+if(!__OU_PLUGIN__){
+  try {
+    var __ouRaw = document.getElementById('payload').textContent;
+    if(__ouRaw && __ouRaw.trim().charAt(0)==='{') __OU_DATA__ = JSON.parse(__ouRaw);
+  } catch(e){ /* 无内嵌数据 */ }
+  if(!__OU_DATA__) __OU_DATA__ = window.__OFFICIAL_USAGE_DATA__ || null;
+}
+
+const DOM = { root: document.getElementById('official-usage-root') };
+
+// ------ 数据（插件模式下初始为 null，由宿主/自取后 bootstrap 注入） ------
+let DATA = __OU_DATA__;
+
+var LV_WEEKS = 53;
+
+function bootstrap(data){
+  DATA = data;
+  byDate.clear();
+  if(DATA) for(const d of DATA.days) byDate.set(d.date, d);
+  cum.clear(); acc = 0;
+  if(DATA) for(const d of DATA.days){ acc += d.tokens; cum.set(d.date, acc); }
+  weeks = buildWeeks();
+  render(); renderTables();
+}
+
+function buildWeeks(){
+  if(!DATA) return [];
+  const lastD = new Date(DATA.window.end+'T00:00:00');
+  const dw = (lastD.getDay()+6)%7;
+  const lastMon = new Date(lastD.getTime()-dw*DAY);
+  const firstMon = new Date(lastMon.getTime()-(LV_WEEKS-1)*7*DAY);
+  const out=[];
+  for(let w=0; w<LV_WEEKS; w++){
+    const days=[];
+    for(let d=0; d<7; d++){
+      const dt=new Date(firstMon.getTime()+(w*7+d)*DAY);
+      const iso=dt.toISOString().slice(0,10);
+      days.push({ date:iso, dt, future: dt>lastD, rec: byDate.get(iso) || null });
+    }
+    out.push(days);
+  }
+  return out;
+}
+const DAY = 86400000;
+const fmt = {
+  tok(n){ if(n>=1e9) return (n/1e9).toFixed(2)+'B'; if(n>=1e6) return (n/1e6).toFixed(1)+'M';
+          if(n>=1e3) return (n/1e3).toFixed(1)+'K'; return String(n); },
+  tokFull(n){ return n.toLocaleString('zh-CN'); },
+  money(c){ return '¥'+c.toFixed(2); },
+  date(s){ const [y,m,d]=s.split('-'); return `${y}年${+m}月${+d}日`; },
+};
+
+// intensity levels, absolute thresholds (Codex style: visually comparable across the year)
+const LV = [1e6, 1e7, 5e7, 1e8];
+function level(v){ if(!v) return 0; for(let i=0;i<LV.length;i++) if(v<LV[i]) return i+1; return 5; }
+
+// build the 53-week grid (Monday first), ending this week
+const byDate = DATA ? new Map(DATA.days.map(d=>[d.date,d])) : new Map();
+let weeks = [];
+if(DATA) weeks = buildWeeks();
+
+// ---------- aggregation ----------
+function weekTokenSum(w){ return w.reduce((a,d)=>a+(d.rec?.tokens||0),0); }
+function valueFor(mode, { day, week }){
+  if(mode==='daily')   return day.rec?.tokens || 0;
+  if(mode==='weekly')  return weekTokenSum(week);
+  return cum.get(day.date) || 0;              // cumulative: running total up to that day
+}
+
+// running cumulative (daily granularity) over the whole window
+const cum = new Map(); let acc=0;
+if(DATA) for(const d of DATA.days){ acc += d.tokens; cum.set(d.date, acc); }
+window.__cum = cum;
+
+const state = { mode:'daily' };
+
+function render(){
+  if(!DATA) return;
+  const mode = state.mode;
+  const scaleMax = mode==='cumulative' ? acc : null;
+
+  // month labels
+  const months = document.getElementById('months');
+  months.innerHTML='';
+  let prevM=null, lastLabelWeek=-99;
+  weeks.forEach((w,i)=>{
+    const m = w[0].dt.getMonth();
+    const s=document.createElement('span'); s.style.width='14px';
+    // label a month only when its first column is far enough from the last label
+    if(m!==prevM && i<52 && (i-lastLabelWeek)>=3){
+      s.textContent = (prevM===null ? w[0].dt.getFullYear()+'年' : '') + (m+1)+'月';
+      s.style.width='auto'; s.style.marginRight='-2px';
+      s.style.position='relative'; s.style.zIndex=1;
+      lastLabelWeek=i;
+    } else s.textContent='';
+    prevM=m; months.appendChild(s);
+  });
+
+  // cells
+  const cols=document.getElementById('cols');
+  cols.innerHTML='';
+  for(const w of weeks){
+    const col=document.createElement('div'); col.className='col';
+    for(const d of w){
+      const c=document.createElement('div'); c.className='c';
+      const v=valueFor(mode,{day:d,week:w});
+      if(!d.future){ c.classList.add('l'+level(v)); }
+      else { c.style.background='transparent'; c.style.boxShadow='inset 0 0 0 1px var(--line)'; }
+      if(!d.future && (v>0 || d.rec)){
+        c.dataset.tip='1';
+        const weekly = weekTokenSum(w);
+        c.dataset.text = d.rec
+          ? `${fmt.date(d.date)}<br>${fmt.tokFull(d.rec.tokens)} tokens · ${d.rec.requests} 次请求<br>花费 ${fmt.money(d.rec.cost)}<br>缓存命中 ${fmt.tok(d.rec.cacheHit)} / 新增 ${fmt.tok(d.rec.cacheMiss)}`
+          : `${fmt.date(d.date)}<br>无使用`;
+        c.dataset.text += mode==='weekly' ? `<br><b>本周 ${fmt.tok(weekly)}</b>` : '';
+        c.dataset.text += mode==='cumulative' ? `<br><b>截至此日累计 ${fmt.tok(cum.get(d.date)||0)}</b>` : '';
+      }
+      col.appendChild(c);
+    }
+    cols.appendChild(col);
+  }
+
+  // stats row（数字滚动动效）
+  const T=DATA.totals, S=DATA.summary, B=DATA.balance;
+  // 余额 = 充值 + 赠金合并成一个数（不做单独标注）；
+  // 兼容两种形状：host 返回 balance{normal,bonus} / 独立文件里的 summary.normal_wallets
+  const wallet = (kind) => (
+    (kind==='normal' ? (B?.normal ?? S?.normal_wallets) : (B?.bonus ?? S?.bonus_wallets))?.[0]?.balance
+  );
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const bal = num(wallet('normal')) + num(wallet('bonus'));
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="k">Token</div><div class="v" id="s-tok">—</div></div>
+    <div class="stat"><div class="k">花费</div><div class="v" id="s-cost">—</div></div>
+    <div class="stat"><div class="k">活跃天数</div><div class="v" id="s-days">—</div></div>
+    <div class="stat"><div class="k">单日峰值</div><div class="v" id="s-peak">—</div></div>
+    <div class="stat"><div class="k">请求次数</div><div class="v" id="s-req">—</div></div>
+    <div class="stat"><div class="k">账户余额</div><div class="v" id="s-bal">—</div></div>`;
+  countUp('s-tok',  T.tokens,                    v=>fmt.tok(Math.round(v)));
+  countUp('s-cost', T.cost,                      v=>fmt.money(v), 2);
+  countUp('s-days', T.activeDays,                v=>String(Math.round(v))+'<small>天</small>');
+  countUp('s-peak', T.peakDay?.tokens||0,        v=>fmt.tok(Math.round(v))+(T.peakDay?`<small>${T.peakDay.date.slice(5)}</small>`:''));
+  countUp('s-req',  T.requests,                  v=>Math.round(v).toLocaleString('zh-CN'));
+  countUp('s-bal',  bal,                         v=>'¥'+v.toFixed(2), 2);
+
+  // 重播草地生长动画（切换模式时）
+  const colsEl = document.getElementById('cols');
+  if(!REDUCED){
+    colsEl.classList.remove('animate');
+    void colsEl.offsetWidth;          // 强制重排，让 animation 重新开始
+    colsEl.classList.add('animate');
+  }
+
+  document.getElementById('lgL').textContent = mode==='cumulative' ? '少' : '<1M';
+  document.getElementById('lgR').textContent = mode==='cumulative' ? fmt.tok(acc) : '≥100M';
+}
+
+// 数字滚动：从上一个显示值滚到新值
+const _statVals = new Map();
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function countUp(id, target, render, decimals){
+  const el = document.getElementById(id); if(!el) return;
+  const from = _statVals.get(id) ?? 0;
+  _statVals.set(id, target);
+  if(REDUCED){ el.innerHTML = render(target); return; }
+  const dur = 620, t0 = performance.now();
+  (function step(now){
+    const p = Math.min(1,(now-t0)/dur);
+    const e = 1-Math.pow(1-p,3);                    // easeOutCubic
+    const v = from + (target-from)*e;
+    el.innerHTML = render(decimals ? v : Math.round(v));
+    if(p<1) requestAnimationFrame(step);
+  })(t0);
+}
+
+// breakdown tables
+function table(rows, label){
+  const max = Math.max(...rows.map(r=>r.total||r.tokens));
+  return `<table><thead><tr><th>${label}</th><th class="num">Token</th><th class="num">占比</th><th class="num">活跃天</th><th></th></tr></thead><tbody>`+
+    rows.map((r,i)=>{
+      const t=r.total||r.tokens, pct=t/DATA.totals.tokens*100;
+      return `<tr><td>${r.name||r.model}</td><td class="num">${fmt.tok(t)}</td><td class="num">${pct.toFixed(1)}%</td>`+
+             `<td class="num">${r.activeDays??'—'}</td>`+
+             `<td style="width:36%"><span class="bar" style="width:${Math.max(2,t/max*100)}%;animation-delay:${0.12+i*0.06}s"></span></td></tr>`;
+    }).join('')+`</tbody></table>`;
+}
+function renderTables(){
+  if(!DATA) return;
+  document.getElementById('bykey').innerHTML = table(DATA.apiKeys,'API Key');
+  document.getElementById('bymodel').innerHTML = table(DATA.models,'模型');
+}
+
+// interactions
+document.getElementById('modes').addEventListener('click', e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  // 刷新键现在也住在这个胶囊里，点它不能当成切换视图
+  if(!b.dataset.m) return;
+  [...e.currentTarget.children].forEach(x=>x.classList.toggle('on', x===b));
+  state.mode=b.dataset.m; render();
+});
+const tip=document.getElementById('tip');
+document.addEventListener('mouseover', e=>{
+  const c=e.target.closest('.c[data-tip]'); if(!c) return;
+  tip.innerHTML=c.dataset.text; tip.classList.add('on');
+});
+document.addEventListener('mousemove', e=>{
+  if(!tip.classList.contains('on')) return;
+  const pad=14; let x=e.clientX+pad, y=e.clientY+pad;
+  const r=tip.getBoundingClientRect();
+  if(x+r.width>innerWidth-8) x=e.clientX-r.width-pad;
+  if(y+r.height>innerHeight-8) y=e.clientY-r.height-pad;
+  tip.style.left=x+'px'; tip.style.top=y+'px';
+});
+document.addEventListener('mouseout', e=>{
+  if(e.target.closest('.c[data-tip]')) tip.classList.remove('on');
+});
+
+// 刷新：先让宿主强刷（跳过它那份 10 分钟缓存），再取回新数据重画
+// 独立文件模式下没有宿主路由，按钮仍然在，取不到就提示一下。
+var REFRESH_URL = (typeof __OU_REFRESH_URL__ !== 'undefined') ? __OU_REFRESH_URL__ : '/dsh-official-usage/api/refresh';
+var STATE_URL = (typeof __OU_STATE_URL__ !== 'undefined') ? __OU_STATE_URL__ : '/dsh-official-usage/api/state';
+function refreshNow(){
+  var btn = document.getElementById('refresh');
+  if(!btn || btn.disabled) return;
+  // 只有图标，所以状态挂在 title / aria-label 上，失败时按钮变红抖一下
+  btn.disabled = true; btn.classList.remove('err'); btn.classList.add('busy');
+  btn.title = '刷新中…'; btn.setAttribute('aria-label', '刷新中…');
+  fetch(REFRESH_URL, { cache: 'no-store' })
+    .then(function(){ return fetch(STATE_URL + '?fresh=1', { cache: 'no-store' }); })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || d.error || !d.days) throw new Error((d && d.error) || '数据为空');
+      bootstrap(d);                     // 重画 + 重播草地生长动画
+      btn.title = '刷新'; btn.setAttribute('aria-label', '刷新');
+    })
+    .catch(function(e){
+      btn.classList.add('err');
+      btn.title = '刷新失败：' + e.message;
+      btn.setAttribute('aria-label', '刷新失败');
+    })
+    .finally(function(){
+      setTimeout(function(){
+        btn.disabled = false; btn.classList.remove('busy');
+      }, 400);
+    });
+}
+var _rb = document.getElementById('refresh');
+if(_rb) _rb.addEventListener('click', refreshNow);
+
+// 宿主用：宿主把数据交给面板（插件模式）
+window.__officialUsageMount = function(payload){ if(payload) bootstrap(payload); };
+window.__officialUsageSetData = function(payload){ bootstrap(payload); };
+window.__officialUsageRefresh = refreshNow;
+
+if(!__OU_PLUGIN__){
+  render(); renderTables();       // 独立文件模式：数据已内嵌
+}
+</script>
+</body>
+</html>
