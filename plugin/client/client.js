@@ -110,27 +110,47 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * 判断 DSH 当前主题，并把每一项线索记进诊断（落盘可查）。
+		 * 从宿主的 ThemeSnapshot 里取出 dark/light。
 		 *
-		 * DSH 的主题是**应用内设置**，和系统主题可以不一致；面板在 iframe 里看
-		 * prefers-color-scheme 会猜错，所以这里按可靠性从高到低试：
-		 *   ① 宿主 theme 服务：ctx.theme.getTheme()（dshmarket 也是这么注入的）
-		 *   ② 宿主提供的 CSS 变量 --dsw-alias-bg-base 的亮度
-		 *   ③ 系统偏好
+		 * **契约是从 DSH 源码里读出来的**（app.asar 内 `@deepseek-ai/dsh-client-ui-theme`）：
+		 *
+		 *   buildSnapshot() {
+		 *     const resolvedId = preference === 'system'
+		 *       ? (media.matches ? 'dark' : 'light') : preference
+		 *     return { preference, fontSize, active: composeActive(active), themes, revision }
+		 *   }
+		 *
+		 * 所以真正答案在 **snapshot.active.colorScheme**（'light' | 'dark'）——
+		 * 嵌在 active 里，不在顶层。只读顶层会永远取不到（踩过）。
+		 * 顶层另有 preference（可能是 'system'），那个不是答案。
 		 */
-		function themeFromSnapshot(snap) {
-			if (!snap || typeof snap !== 'object') return null
-			// 宿主没公开 ThemeSnapshot 的字段名，常见的几种都认
-			var keys = ['colorScheme', 'scheme', 'mode', 'appearance', 'theme', 'type']
+		function pickScheme(obj) {
+			if (!obj || typeof obj !== 'object') return null
+			var keys = ['colorScheme', 'scheme', 'mode', 'appearance', 'type']
 			for (var i = 0; i < keys.length; i++) {
-				var v = snap[keys[i]]
+				var v = obj[keys[i]]
 				if (typeof v === 'string') {
 					var s = v.toLowerCase()
 					if (s === 'dark' || s === 'light') return s
 				}
 			}
-			if (typeof snap.dark === 'boolean') return snap.dark ? 'dark' : 'light'
-			if (typeof snap.isDark === 'boolean') return snap.isDark ? 'dark' : 'light'
+			if (typeof obj.dark === 'boolean') return obj.dark ? 'dark' : 'light'
+			if (typeof obj.isDark === 'boolean') return obj.isDark ? 'dark' : 'light'
+			return null
+		}
+
+		function themeFromSnapshot(snap) {
+			if (!snap || typeof snap !== 'object') return null
+			// ① 宿主真实契约：active.colorScheme
+			var nested = snap.active ?? snap.current ?? snap.theme ?? snap.resolved
+			var fromNested = pickScheme(nested)
+			if (fromNested) return fromNested
+			// ② 顶层字段（老版本或第三方实现）
+			var fromTop = pickScheme(snap)
+			if (fromTop) return fromTop
+			// ③ active.id 是 'dark' / 'light' 也能用
+			var id = (snap.active && snap.active.id) || snap.id
+			if (typeof id === 'string' && (id === 'dark' || id === 'light')) return id
 			return null
 		}
 
@@ -186,11 +206,14 @@ window.__ModuleLoader__.load({
 		function detectTheme() {
 			var diag = { snapshot: null, snapshotRaw: null, sample: null, cssVar: null, cssValue: null, system: null, decided: null }
 
-			// ① 宿主 theme 服务（DSH 自己的契约：snapshot.colorScheme 是 'light' | 'dark'）
+			// ① 宿主 theme 服务（契约：snapshot.active.colorScheme 是 'light' | 'dark'）
 			try {
 				if (themeCtx && typeof themeCtx.getTheme === 'function') {
 					var snap = themeCtx.getTheme()
 					diag.snapshotRaw = snap ? Object.keys(snap).join(',') : '(null)'
+					diag.snapshotActive = snap && snap.active ? Object.keys(snap.active).join(',') : null
+					diag.snapshotPreference = snap ? snap.preference : null
+					diag.snapshotActiveId = snap && snap.active ? snap.active.id : null
 					diag.snapshot = themeFromSnapshot(snap)
 					if (diag.snapshot) { diag.decided = diag.snapshot; diag.source = 'theme-service'; window.__OU_CLIENT_DIAG__ = diag; return diag.decided }
 				}
