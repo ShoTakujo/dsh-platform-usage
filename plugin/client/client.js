@@ -134,25 +134,59 @@ window.__ModuleLoader__.load({
 			return null
 		}
 
+		/**
+		 * 算颜色的相对亮度；**透明或解析不出来的返回 null**（表示"没测到"，继续往下走）。
+		 *
+		 * 这里栽过一次：`rgba(0,0,0,0)`（全透明）曾被算成 0.000 → 判定为暗色。
+		 * 探针量到透明时本该"作废"，结果反而给出了错误结论，还挡住了后面的兜底。
+		 */
 		function luminance(color) {
 			var s = String(color || '').trim()
+			if (!s || s === 'transparent') return null
 			var hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(s)
 			if (hex) {
 				var v = hex[1]
 				if (v.length === 3) v = v[0] + v[0] + v[1] + v[1] + v[2] + v[2]
 				return (0.299 * parseInt(v.slice(0, 2), 16) + 0.587 * parseInt(v.slice(2, 4), 16) + 0.114 * parseInt(v.slice(4, 6), 16)) / 255
 			}
-			var m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(s)
+			var m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+))?/.exec(s)
 			if (!m) return null
+			var alpha = m[4] === undefined ? 1 : Number(m[4])
+			if (!(alpha > 0.05)) return null        // 透明：当作没测到
 			return (0.299 * Number(m[1]) + 0.587 * Number(m[2]) + 0.114 * Number(m[3])) / 255
 		}
 
 		var themeCtx = null            // 由 apply(ctx) 注入：宿主的 theme 服务
 		var ctxRef = { current: null } // 整个 ctx，用来订阅 theme/change
-		function detectTheme() {
-			var diag = { snapshot: null, snapshotRaw: null, cssVar: null, cssValue: null, system: null, decided: null }
+		/**
+		 * 兜底：往宿主文档里塞一个隐藏元素，量它**实际渲染出来的背景色**。
+		 *
+		 * 这一条不依赖任何变量名或值格式——浏览器已经把主题解析完了，量到的就是真相。
+		 * DSH 的 theme 服务里 tokens 是「按 colorScheme 索引的原始值」，根元素上的
+		 * --dsw-alias-bg-base 有可能取到空串（实测有过），所以必须有这条。
+		 */
+		function sampleHostBackground() {
+			var probe = null
+			try {
+				probe = document.createElement('div')
+				probe.setAttribute('aria-hidden', 'true')
+				probe.style.cssText = 'position:absolute;left:-9999px;top:0;width:1px;height:1px;' +
+					'pointer-events:none;background:var(--dsw-alias-bg-base, var(--dsw-alias-bg-layer-1, transparent))'
+				document.body.appendChild(probe)
+				var bg = getComputedStyle(probe).backgroundColor
+				var l = luminance(bg)
+				return { bg: bg, lum: l }
+			} catch (e) {
+				return { bg: null, lum: null }
+			} finally {
+				try { if (probe && probe.parentNode) probe.parentNode.removeChild(probe) } catch (e) { /* ignore */ }
+			}
+		}
 
-			// ① 宿主 theme 服务
+		function detectTheme() {
+			var diag = { snapshot: null, snapshotRaw: null, sample: null, cssVar: null, cssValue: null, system: null, decided: null }
+
+			// ① 宿主 theme 服务（DSH 自己的契约：snapshot.colorScheme 是 'light' | 'dark'）
 			try {
 				if (themeCtx && typeof themeCtx.getTheme === 'function') {
 					var snap = themeCtx.getTheme()
@@ -162,7 +196,19 @@ window.__ModuleLoader__.load({
 				}
 			} catch (e) { diag.snapshotRaw = 'err: ' + String(e && e.message).slice(0, 60) }
 
-			// ② 宿主 CSS 变量
+			// ② 往宿主文档塞探针，量实际背景（最可靠的一条，绕开变量名与取值格式）
+			try {
+				var s = sampleHostBackground()
+				diag.sample = s.bg
+				if (s.lum !== null) {
+					diag.decided = s.lum < 0.5 ? 'dark' : 'light'
+					diag.source = 'host-sample'
+					window.__OU_CLIENT_DIAG__ = diag
+					return diag.decided
+				}
+			} catch (e) { /* 继续 */ }
+
+			// ③ 直接读 CSS 变量（可能在根元素上取到空串，所以放在探针之后）
 			try {
 				var cs = getComputedStyle(document.documentElement)
 				var names = ['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3']
@@ -178,7 +224,7 @@ window.__ModuleLoader__.load({
 				}
 			} catch (e) { /* 继续 */ }
 
-			// ③ 系统偏好
+			// ④ 系统偏好
 			try {
 				diag.system = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'
 			} catch (e) { diag.system = 'light' }
