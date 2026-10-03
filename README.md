@@ -1,4 +1,3 @@
-
 # dsh-platform-usage
 
 在 DSH 的设置页里看 DeepSeek 开放平台的**账号级** Token 活动：52 周热力图，可切每天 / 每周 / 累计总量。
@@ -7,7 +6,7 @@
 
 不是 DeepSeek 官方项目，数据取自官方平台而已。
 
-<img width="1199" height="1196" alt="screenshot" src="https://github.com/user-attachments/assets/8afb108f-6b99-43fa-ae66-0279b4aeef6a" />
+![平台用量面板](docs/screenshot.png)
 
 ## 做到了什么
 
