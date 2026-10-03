@@ -32,6 +32,26 @@
     catch (e) { return null; }
   }
 
+  // 在**宿主文档**里插一个隐藏元素，量它继承后的实际取值。
+  // 自定义属性会继承，而 DSH 把设计 token 挂在 body 上，根元素上取不到。
+  function sampleVar(win, name) {
+    var el = null;
+    try {
+      var doc = win.document;
+      if (!doc || !doc.body) return null;
+      el = doc.createElement('div');
+      el.setAttribute('aria-hidden', 'true');
+      el.style.cssText = 'position:absolute;left:-9999px;top:0;width:1px;height:1px;pointer-events:none;' +
+        'background:var(' + name + ', transparent)';
+      doc.body.appendChild(el);
+      return String(win.getComputedStyle(el).backgroundColor || '').trim();
+    } catch (e) {
+      return null;
+    } finally {
+      try { if (el && el.parentNode) el.parentNode.removeChild(el) } catch (e) { /* ignore */ }
+    }
+  }
+
   // 1) 宿主参数
   try { diag.param = new URLSearchParams(location.search).get('theme'); } catch (e) { diag.param = null; }
   if (diag.param === 'dark' || diag.param === 'light') {
@@ -51,15 +71,25 @@
 
       var alive = false;
       try { alive = !!w.document && !!w.document.documentElement; } catch (e) { alive = false; }
-      var bgBase = alive ? readVar(w, '--dsw-alias-bg-base') : null;
-      diag.chain.push({ level: i + 1, reachable: alive, bgBase: bgBase });
+      diag.chain.push({ level: i + 1, reachable: alive });
 
       if (!alive) { diag.steps.push('第 ' + (i + 1) + ' 层：读不到文档（跨源）'); continue; }
-      var l = lum(bgBase);
-      if (l === null) { diag.steps.push('第 ' + (i + 1) + ' 层：--dsw-alias-bg-base="' + bgBase + '" 解析不出颜色'); continue; }
+
+      // 先直接读根元素；DSH 的设计 token 挂在 **body** 上，根元素常常是空串，
+      // 所以读不到就在那份文档里插个探针，量它**继承后的实际值**。
+      var raw = readVar(w, '--dsw-alias-bg-base');
+      var l = lum(raw);
+      if (l === null) {
+        l = lum(sampleVar(w, '--dsw-alias-bg-base'));
+        if (l !== null) diag.steps.push('第 ' + (i + 1) + ' 层：根元素读不到，改用探针量继承值');
+      }
+      if (l === null) {
+        diag.steps.push('第 ' + (i + 1) + ' 层：--dsw-alias-bg-base="' + raw + '" 且探针也量不到');
+        continue;
+      }
       diag.decided = l < 0.5 ? 'dark' : 'light';
       diag.source = 'ancestor@' + (i + 1);
-      diag.steps.push('第 ' + (i + 1) + ' 层：' + bgBase + ' → 亮度 ' + l.toFixed(3) + ' → ' + diag.decided);
+      diag.steps.push('第 ' + (i + 1) + ' 层：亮度 ' + l.toFixed(3) + ' → ' + diag.decided);
       break;
     }
   }
