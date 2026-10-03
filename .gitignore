@@ -1,0 +1,19 @@
+# 依赖与构建产物
+node_modules/
+
+# 本地凭据 / 抓取到的数据（永远不要提交）
+.credentials.yaml
+*.token
+.secrets/
+*.har
+harvest*.json
+
+# 个人用量快照
+data.json
+host-test-state.json
+
+# 测试与截图产物
+shots/
+*.tmp
+.DS_Store
+Thumbs.db
