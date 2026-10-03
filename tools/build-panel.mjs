@@ -1,6 +1,7 @@
 // Generate the DSH plugin panel from the standalone dashboard template.
 //
 //   src/panel/template.html  ->  plugin/lib/dashboard.html   (面板本体，iframe 加载)
+//   src/panel/theme-boot.js  ->  嵌进 dashboard.html 的主题判定脚本
 //                                plugin/lib/dashboard.js     (同一份脚本，便于阅读)
 //                                plugin/lib/styles.css       (提取出来的样式)
 //
@@ -12,10 +13,14 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'src', 'panel', 'template.html');
+const BOOT = join(ROOT, 'src', 'panel', 'theme-boot.js');
 const PLUGIN = join(ROOT, 'plugin');
 mkdirSync(join(PLUGIN, 'lib'), { recursive: true });
 
 const html = readFileSync(SRC, 'utf8');
+// 主题脚本单独成文件再读进来：塞进模板字符串的话，正则里的 \s \d 会被 JS 当转义吃掉
+// （踩过一次，产物里 /rgba?\(\s*(\d+)…/ 变成了 /rgba?(s*(d+)…/，探测直接空转）
+const themeBoot = readFileSync(BOOT, 'utf8');
 
 const styleMatch = html.match(/<style>([\s\S]*?)<\/style>/);
 if (!styleMatch) throw new Error('template.html 里找不到 <style>');
@@ -49,6 +54,8 @@ const doc = `<!doctype html>
 </head>
 <body>
 ${rootHtml}
+<script>
+${themeBoot}</script>
 <script>var __OU_PLUGIN__ = true;</script>
 <script>${adapted}</script>
 <script>
@@ -73,6 +80,14 @@ ${rootHtml}
 
 if (doc.includes('__PAYLOAD_JSON__')) throw new Error('面板 HTML 里还留着 payload 占位符');
 if (!doc.includes('/dsh-official-usage/api/state')) throw new Error('面板里没有数据拉取逻辑');
+// 用「字面包含」而不是正则来断言——写断言时又被同一类转义坑绊过一次
+for (const [name, needle] of [
+  ['主题判定脚本', '__OU_THEME__'],
+  ['亮度正则没被转义吃掉', String.raw`/rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/`],
+  ['面板根节点', 'id="official-usage-root"'],
+]) {
+  if (!doc.includes(needle)) throw new Error('面板产物缺少：' + name);
+}
 
 writeFileSync(join(PLUGIN, 'lib', 'dashboard.html'), doc, 'utf8');
 writeFileSync(join(PLUGIN, 'lib', 'dashboard.js'), adapted, 'utf8');

@@ -205,6 +205,7 @@
   }
 </style>
 <style>
+  /* 插件内嵌：去掉独立页面的最大宽度，交给宿主容器 */
   html,body{background:transparent}
   .wrap{max-width:none;padding:2px 2px 10px}
   .loading{padding:60px 0;text-align:center;color:var(--dim);font-size:13px}
@@ -255,11 +256,47 @@
 </div>
 <div id="tip"></div>
 <script>
-// 主题由宿主显式告知（?theme=dark|light），不靠 prefers-color-scheme 猜：
-// DSH 的主题是应用内设置，和系统主题可以不一致，猜就会错配（出现过「DSH 亮色、面板暗色」）。
-(function(){
-  var t = new URLSearchParams(location.search).get('theme');
-  if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+// 面板启动前的主题判定。由 build-plugin.mjs 原样嵌进 <script>（按文件读，不走模板字符串，
+// 免得正则里的 \s \d 被 JS 转义吃掉——这个坑真踩过）。
+//
+// 优先级：
+//   1. 宿主显式传的 ?theme=dark|light（客户端读 DSH 的 --dsw-alias-bg-base 后带上）
+//   2. 自己顺着 frame 链往上读宿主文档（同源才行；这样客户端没更新时不重启也能对）
+//   3. 系统偏好 prefers-color-scheme（独立打开面板时）
+(function () {
+  function lum(color) {
+    var m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(color || '');
+    if (!m) return null;
+    return (0.299 * Number(m[1]) + 0.587 * Number(m[2]) + 0.114 * Number(m[3])) / 255;
+  }
+
+  function fromAncestors() {
+    var w = window;
+    for (var i = 0; i < 8; i++) {
+      if (w === w.parent) break;
+      w = w.parent;
+      try {
+        var cs = w.getComputedStyle(w.document.documentElement);
+        var l = lum(cs.getPropertyValue('--dsw-alias-bg-base'));
+        if (l === null) l = lum(cs.backgroundColor);
+        if (l !== null) return l < 0.5 ? 'dark' : 'light';
+      } catch (e) { /* 跨源：继续往上找 */ }
+    }
+    return null;
+  }
+
+  var param = new URLSearchParams(location.search).get('theme');
+  var source = 'param';
+  var theme = (param === 'dark' || param === 'light') ? param : null;
+
+  if (!theme) { theme = fromAncestors(); source = 'ancestor'; }
+  if (!theme) {
+    source = 'system';
+    theme = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+
+  document.documentElement.setAttribute('data-theme', theme);
+  window.__OU_THEME__ = { theme: theme, source: source };
 })();
 </script>
 <script>var __OU_PLUGIN__ = true;</script>
@@ -533,12 +570,12 @@ if(!__OU_PLUGIN__){
 </script>
 <script>
 (function(){
-  // 打开面板先拿一次数据（走宿主的 10 分钟缓存，毫秒级）；
-  // 右上角的「刷新」按钮会带 fresh=1 强刷。
+  // 打开面板先取一次数据（走宿主的 10 分钟缓存，毫秒级返回）；
+  // 面板右上角的刷新键会带 fresh=1 强制重采。
   fetch('/dsh-official-usage/api/state', { cache: 'no-store' })
     .then(function(r){ return r.json(); })
     .then(function(d){
-      if(!d || !d.days || !d.days.length){ throw new Error((d && d.error) || '宿主还没取到官方用量数据'); }
+      if(!d || !d.days || !d.days.length){ throw new Error((d && d.error) || '宿主还没取到平台用量数据'); }
       window.__OFFICIAL_USAGE_DATA__ = d;
       if(window.__officialUsageSetData) window.__officialUsageSetData(d);
       else if(window.__officialUsageMount) window.__officialUsageMount(d);
