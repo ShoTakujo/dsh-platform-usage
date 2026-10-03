@@ -109,11 +109,56 @@ window.__ModuleLoader__.load({
 			}
 		}
 
+		/**
+		 * 读 DSH 当前主题，显式告诉面板。
+		 *
+		 * 为什么不靠面板自己判断：DSH 的主题是**应用内设置**（右上角切换），和系统主题
+		 * 可以不一致；面板在 iframe 里只能看 prefers-color-scheme，猜就会错配——实际出现过
+		 * 「DSH 亮色、面板内部认到暗色」的画面（背景白、格子暗）。
+		 * 这里优先问宿主提供的 CSS 变量（--dsw-alias-bg-base 等），拿不到再退回系统偏好。
+		 */
+		function detectTheme() {
+			try {
+				var cs = getComputedStyle(document.documentElement)
+				var names = ['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-3']
+				for (var i = 0; i < names.length; i++) {
+					var v = (cs.getPropertyValue(names[i]) || '').trim()
+					var m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(v)
+					if (!m) continue
+					var lum = (0.299 * Number(m[1]) + 0.587 * Number(m[2]) + 0.114 * Number(m[3])) / 255
+					return lum < 0.5 ? 'dark' : 'light'
+				}
+			} catch (e) { /* 拿不到就往下走 */ }
+			try {
+				return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+			} catch (e) { return 'light' }
+		}
+
 		function Panel() {
+			var theme = detectTheme()
+			var ref = React.useRef(null)
+
+			// 宿主切换主题时跟着换：监听 <html> 的属性变化，重设 iframe 的地址。
+			// 这样面板始终和 DSH 一致，不需要用户手动刷新。
+			React.useEffect(function () {
+				var now = detectTheme()
+				var last = now
+				var timer = setInterval(function () {
+					var t = detectTheme()
+					if (t !== last) {
+						last = t
+						var f = ref.current
+						if (f) f.src = PANEL_URL + '?theme=' + t
+					}
+				}, 1500)
+				return function () { clearInterval(timer) }
+			}, [])
+
 			return h('iframe', {
+				ref: ref,
 				className: 'dou-frame',
 				title: SECTION_LABEL,
-				src: PANEL_URL,
+				src: PANEL_URL + '?theme=' + theme,
 			})
 		}
 

@@ -10,14 +10,26 @@
     --glass-stroke:rgba(17,24,39,.07);
     --glass-shadow:0 6px 26px rgba(15,23,42,.09), 0 1px 3px rgba(15,23,42,.05);
   }
+  /* 暗色变量抽成一份，两个入口共用：
+       · 独立打开 → 跟随系统 prefers-color-scheme
+       · 插件面板 → 靠 <html data-theme="dark"> 显式指定（DSH 的主题是应用内设置，
+         不一定等于系统主题；早先只认媒体查询，就会出现「DSH 亮色、面板暗色」的错配） */
+  :root[data-theme="dark"]{
+    --bg:#16181c; --card:#242629; --line:#34383d; --text:#e8eaed; --dim:#9aa0a6;
+    --l0:#2d3134; --l1:#1a5c38; --l2:#238040; --l3:#35b953; --l4:#4ade63;
+    --glass:rgba(38,41,46,.55); --glass-strong:rgba(44,47,53,.78);
+    --glass-line:rgba(255,255,255,.08); --glass-stroke:rgba(255,255,255,.10);
+    --glass-shadow:0 8px 30px rgba(0,0,0,.42), 0 1px 3px rgba(0,0,0,.3);
+  }
+  /* 没被显式指定主题时（独立打开），跟随系统 */
   @media (prefers-color-scheme: dark){
-    /* 暗色下四档绿色整体提亮：原来 1/2 档（#0e4429 / #006d32）压在深灰底上
-       几乎看不出有色，实测 62 个有色格子里 38 个落在最暗两档。 */
-    :root{ --bg:#16181c; --card:#242629; --line:#34383d; --text:#e8eaed; --dim:#9aa0a6;
-           --l0:#2d3134; --l1:#1a5c38; --l2:#238040; --l3:#35b953; --l4:#4ade63;
-           --glass:rgba(38,41,46,.55); --glass-strong:rgba(44,47,53,.78);
-           --glass-line:rgba(255,255,255,.08); --glass-stroke:rgba(255,255,255,.10);
-           --glass-shadow:0 8px 30px rgba(0,0,0,.42), 0 1px 3px rgba(0,0,0,.3); }
+    :root:not([data-theme="light"]){
+      --bg:#16181c; --card:#242629; --line:#34383d; --text:#e8eaed; --dim:#9aa0a6;
+      --l0:#2d3134; --l1:#1a5c38; --l2:#238040; --l3:#35b953; --l4:#4ade63;
+      --glass:rgba(38,41,46,.55); --glass-strong:rgba(44,47,53,.78);
+      --glass-line:rgba(255,255,255,.08); --glass-stroke:rgba(255,255,255,.10);
+      --glass-shadow:0 8px 30px rgba(0,0,0,.42), 0 1px 3px rgba(0,0,0,.3);
+    }
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--text);
