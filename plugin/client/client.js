@@ -110,48 +110,116 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * 读 DSH 当前主题，显式告诉面板。
+		 * 判断 DSH 当前主题，并把每一项线索记进诊断（落盘可查）。
 		 *
-		 * 为什么不靠面板自己判断：DSH 的主题是**应用内设置**（右上角切换），和系统主题
-		 * 可以不一致；面板在 iframe 里只能看 prefers-color-scheme，猜就会错配——实际出现过
-		 * 「DSH 亮色、面板内部认到暗色」的画面（背景白、格子暗）。
-		 * 这里优先问宿主提供的 CSS 变量（--dsw-alias-bg-base 等），拿不到再退回系统偏好。
+		 * DSH 的主题是**应用内设置**，和系统主题可以不一致；面板在 iframe 里看
+		 * prefers-color-scheme 会猜错，所以这里按可靠性从高到低试：
+		 *   ① 宿主 theme 服务：ctx.theme.getTheme()（dshmarket 也是这么注入的）
+		 *   ② 宿主提供的 CSS 变量 --dsw-alias-bg-base 的亮度
+		 *   ③ 系统偏好
 		 */
+		function themeFromSnapshot(snap) {
+			if (!snap || typeof snap !== 'object') return null
+			// 宿主没公开 ThemeSnapshot 的字段名，常见的几种都认
+			var keys = ['colorScheme', 'scheme', 'mode', 'appearance', 'theme', 'type']
+			for (var i = 0; i < keys.length; i++) {
+				var v = snap[keys[i]]
+				if (typeof v === 'string') {
+					var s = v.toLowerCase()
+					if (s === 'dark' || s === 'light') return s
+				}
+			}
+			if (typeof snap.dark === 'boolean') return snap.dark ? 'dark' : 'light'
+			if (typeof snap.isDark === 'boolean') return snap.isDark ? 'dark' : 'light'
+			return null
+		}
+
+		function luminance(color) {
+			var s = String(color || '').trim()
+			var hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(s)
+			if (hex) {
+				var v = hex[1]
+				if (v.length === 3) v = v[0] + v[0] + v[1] + v[1] + v[2] + v[2]
+				return (0.299 * parseInt(v.slice(0, 2), 16) + 0.587 * parseInt(v.slice(2, 4), 16) + 0.114 * parseInt(v.slice(4, 6), 16)) / 255
+			}
+			var m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(s)
+			if (!m) return null
+			return (0.299 * Number(m[1]) + 0.587 * Number(m[2]) + 0.114 * Number(m[3])) / 255
+		}
+
+		var themeCtx = null            // 由 apply(ctx) 注入：宿主的 theme 服务
+		var ctxRef = { current: null } // 整个 ctx，用来订阅 theme/change
 		function detectTheme() {
+			var diag = { snapshot: null, snapshotRaw: null, cssVar: null, cssValue: null, system: null, decided: null }
+
+			// ① 宿主 theme 服务
+			try {
+				if (themeCtx && typeof themeCtx.getTheme === 'function') {
+					var snap = themeCtx.getTheme()
+					diag.snapshotRaw = snap ? Object.keys(snap).join(',') : '(null)'
+					diag.snapshot = themeFromSnapshot(snap)
+					if (diag.snapshot) { diag.decided = diag.snapshot; diag.source = 'theme-service'; window.__OU_CLIENT_DIAG__ = diag; return diag.decided }
+				}
+			} catch (e) { diag.snapshotRaw = 'err: ' + String(e && e.message).slice(0, 60) }
+
+			// ② 宿主 CSS 变量
 			try {
 				var cs = getComputedStyle(document.documentElement)
-				var names = ['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-3']
+				var names = ['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3']
 				for (var i = 0; i < names.length; i++) {
-					var v = (cs.getPropertyValue(names[i]) || '').trim()
-					var m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(v)
-					if (!m) continue
-					var lum = (0.299 * Number(m[1]) + 0.587 * Number(m[2]) + 0.114 * Number(m[3])) / 255
-					return lum < 0.5 ? 'dark' : 'light'
+					var raw = (cs.getPropertyValue(names[i]) || '').trim()
+					var l = luminance(raw)
+					if (l === null) continue
+					diag.cssVar = names[i]; diag.cssValue = raw
+					diag.decided = l < 0.5 ? 'dark' : 'light'
+					diag.source = 'css-var'
+					window.__OU_CLIENT_DIAG__ = diag
+					return diag.decided
 				}
-			} catch (e) { /* 拿不到就往下走 */ }
+			} catch (e) { /* 继续 */ }
+
+			// ③ 系统偏好
 			try {
-				return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-			} catch (e) { return 'light' }
+				diag.system = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'
+			} catch (e) { diag.system = 'light' }
+			diag.decided = diag.system
+			diag.source = 'system'
+			window.__OU_CLIENT_DIAG__ = diag
+			return diag.decided
 		}
 
 		function Panel() {
 			var theme = detectTheme()
 			var ref = React.useRef(null)
 
-			// 宿主切换主题时跟着换：监听 <html> 的属性变化，重设 iframe 的地址。
-			// 这样面板始终和 DSH 一致，不需要用户手动刷新。
+			// 宿主切主题时跟着换。优先订阅宿主的 theme/change 事件（dshmarket 用的就是这个），
+			// 拿不到事件源再退回轮询。
 			React.useEffect(function () {
-				var now = detectTheme()
-				var last = now
+				function apply(t) {
+					var f = ref.current
+					if (f) f.src = PANEL_URL + '?theme=' + t
+				}
+				var last = detectTheme()
+				var off = null
+				try {
+					if (ctxRef.current && typeof ctxRef.current.on === 'function') {
+						off = ctxRef.current.on('theme/change', function () {
+							var t = detectTheme()
+							if (t !== last) { last = t; apply(t) }
+						})
+					}
+				} catch (e) { off = null }
+
+				// 订阅拿不到时也有兜底，反正代价很低
 				var timer = setInterval(function () {
 					var t = detectTheme()
-					if (t !== last) {
-						last = t
-						var f = ref.current
-						if (f) f.src = PANEL_URL + '?theme=' + t
-					}
+					if (t !== last) { last = t; apply(t) }
 				}, 1500)
-				return function () { clearInterval(timer) }
+
+				return function () {
+					clearInterval(timer)
+					try { if (typeof off === 'function') off() } catch (e) { /* ignore */ }
+				}
 			}, [])
 
 			return h('iframe', {
@@ -191,14 +259,18 @@ window.__ModuleLoader__.load({
 		}
 
 		function start(ctx) {
+			// 宿主的 theme 服务：dshmarket 声明 inject 里有 'theme'，用的就是 ctx.theme.getTheme()
+			ctxRef.current = ctx
+			try { themeCtx = ctx && ctx.theme ? ctx.theme : null } catch (e) { themeCtx = null }
 			installStyle()
 			return registerAll(ctx)
 		}
 
 		// ⚠️ 必须是 export const（注入器骨架按文本校验）
+		// theme 加进 inject：拿不到也不会致命（detectTheme 会依次退回 CSS 变量和系统偏好）
 		return {
 			name: PLUGIN_ID,
-			inject: ['slots'],
+			inject: ['slots', 'theme'],
 			apply: function (ctx) {
 				ctx.effect
 					? ctx.effect(function () { return start(ctx) }, PLUGIN_ID + ': settings section')
