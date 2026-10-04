@@ -82,13 +82,22 @@ async function apiJson(pathname, token, tries = 3) {
 
 // --------------------------------------------------------------------------
 // 聚合：按天 × 模型 × API Key
+//
+// 「一天」的口径 = **东八区**（DeepSeek 开放平台自己的日历口径）。
+// 实测（2026-10-04）：接口是按**查询起点所在的那个午夜**来分日的 ——
+//   起点给 2026-09-30T16:00Z（= 东八区 10-01 00:00）→ 返回的 4 个日桶都戳在 16:00Z；
+//   起点给 2026-10-01T00:00Z（UTC 午夜）    → 同样 4 天，戳都在 00:00Z，数值一一对应。
+// 所以只要把窗口按东八区午夜对齐，拿到的就是东八区的「天」；
+// 顺带一句：请求里的 tz 参数在这台账号上实测**不影响分桶**（tz=28800 与 tz=0 逐桶相同），
+// 真正起作用的是窗口对齐方式，别指望它。
 // --------------------------------------------------------------------------
-function dayKey(ts) { return new Date(ts * 1000).toISOString().slice(0, 10); }
+const TZ = 8 * 3600;                                  // 东八区
+function dayKey(ts) { return new Date((ts + TZ) * 1000).toISOString().slice(0, 10); }
 
 async function collect(token, weeks) {
     const days = Math.max(1, weeks) * 7;
     const now = Math.floor(Date.now() / 1000);
-    const end = Math.ceil(now / DAY) * DAY;            // 与平台 UI 对齐的 UTC 零点网格
+    const end = Math.ceil((now + TZ) / DAY) * DAY - TZ;   // 下一个东八区午夜（epoch 秒）
     const start = end - days * DAY;
 
     const windows = [];
@@ -256,6 +265,19 @@ export function apply(ctx, config) {
                     res.end(html);
                     return;
                 }
+                // 面板的运行时资产（CSS/HTML + 两个版本号）：客户端挂载时拉一次，
+                // 版本对得上就整块重铺 —— 改外观不用重启 DSH。no-store，永远读磁盘上最新的。
+                if (sub === '/panel-assets.json') {
+                    const file = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\//, '')), 'panel-assets.json');
+                    try {
+                        const body = fs.readFileSync(file);
+                        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+                        res.end(body);
+                    } catch {
+                        json(404, { error: 'panel-assets.json 还没生成：在插件目录跑 node tools/build-panel.mjs' });
+                    }
+                    return;
+                }
                 if (sub === '/api/state') {
                     const force = /[?&]fresh=1(?:&|$)/.test(url);
                     const c = await build(force);
@@ -272,7 +294,7 @@ export function apply(ctx, config) {
                     json(200, { ok: true, generatedAt: c.data.generatedAt, days: c.data.days.length });
                     return;
                 }
-                json(200, { ok: true, service: name, endpoints: ['/api/state', '/api/balance', '/api/refresh', '/panel.html'] });
+                json(200, { ok: true, service: name, endpoints: ['/api/state', '/api/balance', '/api/refresh', '/panel.html', '/panel-assets.json'] });
             }
             catch (e) {
                 json(500, { error: e?.message ?? 'internal error', code: e?.code ?? null });

@@ -1,6 +1,6 @@
 {
   "name": "dsh-official-usage",
-  "version": "0.1.1",
+  "version": "0.2.3",
   "description": "DSH 用量插件：读 DeepSeek 开放平台的账号级数据，把该账号下全部 API Key 的消耗画成 52 周热力图（每天/每周/累计可切），覆盖 Claude Code、Hermes 等所有客户端。社区插件，非官方项目。",
   "type": "module",
   "main": "./lib/index.js",

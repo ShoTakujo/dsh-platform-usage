@@ -10,97 +10,84 @@
 
 ## 当前状态
 
-**能用的**：数据采集与展示全部可用。热力图、三档切换、六项统计、按 Key / 按模型两张拆分表、悬停详情、刷新键、动画，都是真实数据跑通的。
+**能用。** 数据采集、展示、交互、主题跟随、壁纸玻璃都通了。
 
-**已修**（都有实测数字）：
-
-| 问题 | 症状 | 处理 |
-| --- | --- | --- |
-| 月份标签漂移 | 53 列里越往右偏得越多，实测到 9 月偏 **83px ≈ 5 个格子** | 标签改为绝对定位 `left = 列索引 × 17px`，与格子几何一致；12 个标签偏差归零 |
-| 暗色四档太暗 | 四档绿压在深灰底上，62 个有色格子里 38 个落在最暗两档，远看一片糊 | 提亮四档（`#0e4429`→`#1a5c38` 等） |
-| 主题判定错位 | 面板认系统偏好、DSH 认应用内设置，两者可不一致 | 面板改为跟随宿主主题，见下 |
-
-**没解决的**：**深色模式下这个面板在某些环境下仍然是白底。**
-
-我在测试环境里已经把它跑通了（宿主只在 `body` 上放主题变量的场景，面板判定为 dark，卡片 `rgba(38,41,46,.55)`、文字 `rgb(232,234,237)`），但在**真实的 DSH Desktop 里仍然是白底**。真机环境我拿不到 DOM，所以还没定位到根因。判定过程记录在 `window.__OU_DIAG__`，有环境能复现的话可以从这里切入。
-
-详见下面「待解决」。
+其中一条曾经阻塞很久的问题已经定位并修掉：**深色模式下某些环境仍然是白底**——真凶不是主题判定，是面板自己把背景刷成了 `transparent`，而它当时活在 iframe 里（iframe 自有画布，默认白色）。现在面板改跑在 **Shadow DOM** 里，背景改成"不刷"，白底从结构上不可能再出现。
 
 ## 做到了什么
 
-热力图的每格是一天，颜色按**绝对阈值**分档（1M / 10M / 50M / 100M），不是按相对排名——所以三月和九月的格子可以直接比深浅，不会因为「那个月整体都低」而看起来一样绿。三档切换里，累计总量是那条从年初爬到现在的线。
+**数据**
 
-统计行六个数字：区间内 Token、花费、活跃天数、单日峰值（带日期）、请求次数、账户余额（充值加赠金合并）。
+- 官方接口按 API Key × 模型逐日取回，7 天一个窗口、并发 4 路、宿主侧缓存 10 分钟
+- 日历口径 = **东八区**（平台自己的口径），采集窗口按东八区午夜对齐
+- 面板开着时**自己保鲜**：每 5 分钟看一次，数据超过 10 分钟就让宿主重采 —— 新的一天出现新格子、今天的绿色自己跟上
+- 默认停在**最新（最右）**那一端；切换档位与刷新不会打断你自己滚到的位置
 
-两张拆分表：按 API Key、按模型。前者是这个插件存在的理由，后者能看出 deepseek-v4-pro 和 flash 谁在吃预算。
+**面板**
 
-动效参考 Codex 那个 `/usage` 的手感：格子按列错开 22ms 逐个长出来（切换档位时重播）、统计数字滚动、表格行淡入、悬停格子放大。全部包在 `prefers-reduced-motion` 里，系统关了动效就全禁用，不会有人被动画烦到。
+- 六档热力图：`0` 灰 ｜ `<5M` ｜ `5–20M` ｜ `20–60M` ｜ `60–120M` ｜ `120–200M` ｜ `≥200M`
+  绝对阈值（跨月可比），两套等距绿梯（暗色越亮越多 / 亮色越深越多），相邻档 OKLab ΔE ≥ 0.079
+- 悬停提示严格三行：`10月3日` / `3.51 亿 token` / `花费 11.97 元`；零用量的过去日子也有提示（两行：日期 + `0 token`）；周 / 累计视图额外补一行说明格子代表什么
+- **Shadow DOM 面板**（不再用 iframe）：CSS 与宿主互相隔离，但设计令牌、字体、`color-scheme` 正常继承
+- 背景**不刷底色** → 直接透出设置窗口自己的材质；壁纸激活时壁纸从面板底下透出来，卡片的 `backdrop-filter` 糊的是真壁纸
+- 主题跟随就一行判断：`body[data-ds-dark-theme]`（DSH 自己的标记，宿主 CSS 也用它）
+- 设置页导航行换成 3×3 热力图图标（宿主没给 icon 字段，靠标记 + CSS mask 补）
 
-刷新键在标题行右侧，点它跳过缓存重新采集，采完重播一次生长动画。失败时图标变红抖两下，鼠标停上去能看到原因。
+**外观可以免重启**
 
-几个实现上的决定，值得单独说：
+面板的 CSS/HTML 另外出一份 `panel-assets.json`，挂载时以 `no-store` 拉一次，版本对得上就整块重铺 —— **改配色 / 间距 / 文案不用重启 DSH**，关掉设置再打开即可。脚本仍走内嵌（运行时不做 eval），所以改结构或逻辑仍需重启。
 
-- 面板跑在 iframe 里，同源加载 host 的路由。这样面板的 CSS 和 DSH 互不污染，面板就是一份完整的独立 HTML，改起来不用碰 DSH。
-- 界面源码只有一份（`src/panel/template.html`），独立文件版和插件版都由它生成。
-- 设置页导航那个 3×3 图标是补丁画出来的，因为 DSH 的 `settings.section` 槽位没有 `icon` 字段，第三方分区一律只能拿到齿轮。
+## 已知限制
 
-## 待解决
-
-### 深色模式下仍然白底（未解决）
-
-**现象**：DSH 处于深色模式，面板却是白底。控制台、设置窗口都是深色，只有这个面板是白的。
-
-**已经做了什么**：面板的主题判定现在按四级优先，逐级回退：
-
-1. 宿主传的 `?theme=dark|light` 参数（客户端读 `ctx.theme.getTheme()` 得到，`inject` 里已声明 `theme`，走的是 DSH 官方主题服务的契约）
-2. 顺着 frame 链往上读宿主文档：根元素读不到就在宿主文档里插隐藏探针，量它**继承后的实际值**（自定义属性会继承）
-3. 直接读 CSS 变量 `--dsw-alias-bg-base` 等的亮度
-4. 系统偏好 `prefers-color-scheme`
-
-**已经确认的宿主契约**（从 `app.asar` 内的 `@deepseek-ai/dsh-client-ui-theme` 读出来的，不是猜的）：
-
-```js
-buildSnapshot() {
-  const resolvedId = this.preference === 'system'
-    ? (this.media?.matches === true ? 'dark' : 'light')
-    : this.preference
-  return { preference, fontSize, active: composeActive(active), themes, revision }
-}
-// active.colorScheme 是 'light' | 'dark'，嵌在 active 里
-// DEFAULT_PREFERENCE = 'system'，即没设过主题时跟随系统
-```
-
-**为什么还没解决**：真机（DSH Desktop）里我拿不到 DOM，只能在无头浏览器里用自己搭的宿主复现。我的复现宿主和真实宿主至少还有一处没对齐——**我把测试宿主改成「主题变量只挂在 body 上」之后，面板侧就判定正确了，但真机仍然白底**，说明还有别的差异没找到。
-
-**下一步可以从这里切入**：面板会把每一步判定记进 `window.__OU_DIAG__`（`{steps, chain, decided, source, param}`），客户端也会记进 `window.__OU_CLIENT_DIAG__`（含 `snapshotPreference` / `snapshotActiveId` / `snapshot` / `sample` / `cssVar` / `source`）。在有问题的环境里读这两个对象，就能知道它到底走到哪一级、读到了什么。
-
-### 其它已知限制
-
-- **依赖平台内部接口，不是公开契约。** 开放平台公开的用量相关 API 只有 `GET /user/balance` 一个，返回余额和赠金，没有任何按天、按模型、按 Key 的明细。逐日数据来自平台网页自己调用的 `/api/v0/usage/by_api_key/{amount,cost}`。平台改版就可能失效——真失效时面板会显示错误，不会假装还有数据。
-- **单次最多查 7 天**，所以取满一年要 53 次请求。并发 4 路，冷启动约 2 秒，之后走 10 分钟缓存。想再往前取需要更多请求，目前没做。
-- **接口不返回 CORS 头**，浏览器不能直连，必须由 DSH 进程代理。代价是装完必须重启一次 DSH。
-- **token 会过期。** 失效后余额读不到、数据停更，得重新取一次。这串 token 权限比 API Key 大，只该放在本机。
+- **token 会过期。** 失效后余额读不到、数据停更，得重新取一次（见「装」）。这串 token 权限比 API Key 大，只该放在本机。
 - **拆不到会话。** 平台按 API Key 聚合，所以你知道「Claude Code 花了 643M」，但不知道「上周三那个调试会话花了多少」。
-- **只在中文区验证过。** 用 `tz=28800`（东八区）对齐日界，其它区域没测过。
-- **面板 iframe 高度写死 1180px。** 窗口特别矮时内部会滚动；没做自适应高度测量。
+- **缓存命中 / 新增、请求次数在面板里看不到。** 悬浮提示按"只要三行"的规格砍掉了这两项（表格里也没有）；想看只能改回去。
+- **档位是绝对阈值，不是相对排名。** 用量长期增长后固定阈值会逐渐"顶格"，届时要重新定边界。
 - **导航图标补丁会静默失效。** 宿主 DOM 变了图标就退回齿轮，不影响面板本体。
 - **单机单人开发。** Windows + DSH Desktop 0.2.0-rc.2 验证通过，其它平台和版本没测。
 
+## 架构（为什么是现在这样）
+
+```
+宿主半   plugin/lib/index.js      采集 + 四个路由 + panel-assets.json
+客户端半 plugin/client/client.js  Shadow DOM 挂载（由 tools/build-panel.mjs 生成，内嵌面板产物）
+面板     src/panel/template.html  CSS + 结构 + 面板脚本；独立打开时也是一个完整页面
+构建     tools/build-panel.mjs    同一份模板 → dashboard.html / dashboard.js / styles.css / client.js / panel-assets.json
+测试     tools/test-client.mjs    77 项：文本守卫、工厂执行、Shadow DOM 挂载、取数、保鲜、资产重铺
+```
+
+**为什么是 Shadow DOM 而不是 iframe**
+
+- iframe 是独立文档：拿不到宿主的 CSS 变量、字体、`color-scheme`；面板里的 `backdrop-filter` 只能糊自己文档里的东西（壁纸玻璃失效）；画布默认白色（`background:transparent` 就等于白底）。
+- Shadow DOM 保留隔离（外面的规则进不来、里面的出不去），但自定义属性与可继承属性照常继承 —— 底色、文字色、玻璃配方、字体全部跟着宿主走，`backdrop-filter` 糊的是真壁纸。
+
+**为什么采集要按东八区对齐**
+
+实测（2026-10-04）：平台接口按**查询起点所在的那个午夜**分日——起点给 `2026-09-30T16:00Z`（东八区 10-01 00:00）就返回东八区的日桶（戳在 16:00Z），起点给 UTC 午夜就返回 UTC 的日桶。请求里的 `tz` 参数在这台账号上实测**不影响分桶**（`tz=28800` 与 `tz=0` 逐桶数值相同），真正起作用的是窗口对齐方式。
+
 ## 开发过程中踩过的坑
 
-这几条不是理论风险，是真踩进去过的，写下来避免重复：
+这几条不是理论风险，是真踩进去过的：
 
-**1. 模板字符串会吃掉正则转义。** 主题判定脚本原本写在 `build-panel.mjs` 的模板字符串里，`/rgba?\(\s*(\d+)/` 生成到产物里变成 `/rgba?(s*(d+)/`——`\s`、`\d`、`\(` 全被当转义处理了。结果是探测逻辑一直空转，而构建不报错。现在这段脚本单独放在 `src/panel/theme-boot.js`，按文件读入，且构建时对产物做**字面量断言**（不是正则断言，写断言时又踩过同一个坑）。
+**1. 模板字符串会吃掉正则转义。** 主题判定脚本原本写在 `build-panel.mjs` 的模板字符串里，`/rgba?\(\s*(\d+)/` 生成到产物里变成 `/rgba?(s*(d+)/`。现在这段脚本单独放 `src/panel/theme-boot.js`，按文件读入，且构建时对产物做**字面量断言**（不是正则断言）。
 
-**2. `getComputedStyle` 对自定义属性返回原始写法。** 宿主写的是 `#16181c`（hex），我第一版只认 `rgb()`，解析失败后**静默**退回系统偏好。现在 hex 与 `rgb()`/`rgba()` 都支持。
+**2. `rgba(0,0,0,0)` 会被算成纯黑。** 全透明颜色的亮度是 0，"没测到"被当成"测到黑色"。现在 alpha ≤ 0.05 一律视为没测到。
 
-**3. `rgba(0,0,0,0)` 会被算成纯黑。** 全透明颜色的亮度是 0，于是"没测到"被当成了"测到黑色"。现在 alpha ≤ 0.05 一律视为没测到，继续往下回退。
+**3. 白底的真凶是"自己刷了一层"，不是"判定错了"。** 面板曾在插件模式下把 `html,body` 刷成 `background:transparent`，盖掉了 `body{background:var(--bg)}`；iframe 画布默认白色，于是暗色主题配白底。前几轮一直在修"怎么判断主题"（判定其实一直是对的：诊断里 `decided` 始终是 `dark`），没人去看"面板自己画的是什么背景"。
 
-**4. 主题变量挂在 `body` 上，不在根元素。** 只读 `documentElement` 会永远取到空串。DSH 的 token 定义就是 `body{--dsw-static-…}` 这种形式。
+**4. `toISOString()` + 本地午夜 = 整张表错位一天。** 网格用 `new Date(iso+'T00:00:00')`（本地零点）再 `toISOString()`（UTC）取日期，东八区下每天都退一天，于是「周日」那一行显示的是周六的日期。现在网格与日期一律 UTC 语义，与宿主 `dayKey` 同一套。
 
-**5. 只读顶层字段会漏掉嵌套契约。** `colorScheme` 在 `snapshot.active` 里，我第一次只在顶层找。
+**5. 档位越界会静默变成"没数据"色。** `level()` 对 ≥1 亿返回 5，而 CSS 只有 `.c.l1 ~ .c.l4` —— 产量最高的那几天挂了个不存在的 class、回落成 `--l0`（没数据那档），看起来就是"今天和昨天的绿色没出现"。现在 `N 个边界 ⇒ N+1 档`，顶格恰好是第 6 档。
 
-**最该记住的一条**：上面 5 个坑之所以反复出现，是因为**我编造的测试环境比真实环境"干净"**。测试宿主把主题变量放在根元素上、用 `rgb()` 写法、快照用顶层字段——每一条都和真实宿主不一样，于是每次都"测试通过但真机无效"。**照真实结构搭测试**比多写几个断言有用得多。
+**6. 悬停提示被祖先的 `backdrop-filter` 劫持。** 设置窗口 + 壁纸玻璃让 `position:fixed` 的包含块不再是视口，tip 按祖先的内容坐标摆放、随滚动越偏越远，最后被 `overflow` 裁掉——表现是"鼠标悬停什么都不显示"。现在 tip 挂进 **top layer**（`popover="manual"`），实测偏差从 (54, −57) 变成准确的 (+14, +14)。
+
+**7. 媒体查询判的是视口宽度，不是容器宽度。** 两张拆分表原本 `@media(min-width:900px)` 时并排；DSH 把面板塞进七八百像素的内容列，而视口很宽——媒体查询照样命中，右边那张表被容器裁掉。现在一律上下排（宽屏要并排得用容器查询 `@container`）。
+
+**8. 滚动容器的内边距不是装饰。** 悬停会把格子放大到 1.55× 并描一圈 1.5px 的环，绘制范围比原格子外扩约 5.9px；而滚动容器的裁剪边就是它自己的 padding box。原来只留 2px，最下面一行的放大环被横向滚动条那一条切掉。
+
+**9. 用 PowerShell 写 JSON 会带 BOM。** `Set-Content -Encoding UTF8` 给 `package.json` 写进了 `ef bb bf`；Node 解析带 BOM 的 JSON 直接抛错，加载器读不到清单 → **整个插件被静默跳过**（宿主和客户端两半都没起来），表现是"装了但什么都没生效"。现在所有 JSON 都用 Node 写（`JSON.stringify` + `utf8`），并另有 BOM 体检。
+
+**最该记住的一条**：上面这些坑之所以反复出现，是因为**编造的测试环境比真实环境"干净"**——测试宿主把主题变量放在根元素、用 `rgb()` 写法、快照用顶层字段、用假 DOM，每一条都和真实宿主不一样，于是"测试通过但真机无效"。**照真实结构搭测试**（Shadow DOM、真壁纸玻璃、真滚动容器、真玻璃祖先）比多写几个断言有用得多。
 
 ## 装
 
@@ -127,51 +114,48 @@ JSON.parse(localStorage.getItem('userToken')).value
 ## 本机路由
 
 ```
-GET /dsh-official-usage/api/state          逐日数据（按 Key × 模型），10 分钟缓存
-GET /dsh-official-usage/api/state?fresh=1  跳过缓存重新采集
-GET /dsh-official-usage/api/balance        实时余额
-GET /dsh-official-usage/api/refresh        强制刷新，返回摘要
-GET /dsh-official-usage/panel.html         面板本体，可加 ?theme=dark|light 指定主题
+GET /dsh-official-usage/api/state            逐日数据（按 Key × 模型），10 分钟缓存
+GET /dsh-official-usage/api/state?fresh=1    跳过缓存重新采集
+GET /dsh-official-usage/api/balance          实时余额
+GET /dsh-official-usage/api/refresh          强制重采（面板右上角刷新键用的就是它）
+GET /dsh-official-usage/panel.html           独立页面版（iframe 时代留下的，保留作调试入口）
+GET /dsh-official-usage/panel-assets.json    运行时资产：CSS/HTML + 两个版本号
 ```
-
-路由前缀是 `dsh-official-usage`（跟包名一致，跟仓库名不一致，历史原因）。
 
 ## 仓库结构
 
 ```
-plugin/                 可直接安装的插件包
-  lib/index.js          host：读 token、采集、聚合、注册路由
-  lib/dashboard.html    面板本体（iframe 加载）
-  client/client.js      浏览器端：注册设置分区、导航图标补丁、主题传递
-  cordis.patch.yml      bundle 补丁
-src/panel/template.html 面板源模板，独立版和插件版共用
-src/panel/theme-boot.js 面板启动前的主题判定（被插进产物，别写进模板字符串）
-tools/build-panel.mjs   由模板生成 plugin/lib/*
-tools/test-client.mjs   客户端 bundle 的结构与运行时检查（31 项）
+plugin/                 可直接安装的 DSH 插件包
+  client/client.js        客户端半（由 tools/build-panel.mjs 生成，勿手改）
+  lib/index.js            宿主半：采集 + 路由
+  lib/dashboard.html      独立页面版（同一份模板 + 主题判定脚本）
+  lib/dashboard.js        面板脚本（便于阅读）
+  lib/styles.css          面板样式（便于阅读）
+  lib/panel-assets.json   运行时资产：CSS/HTML + cssRev/jsRev
+  cordis.patch.yml        bundle patch：把自己插进 profile 的层栈
+src/panel/template.html   面板的唯一真源（CSS + 结构 + 面板脚本）
+src/panel/theme-boot.js   独立页面用的主题判定脚本
+src/client/client.src.js  客户端半的唯一真源
+tools/build-panel.mjs     构建：模板 → 上面那些产物
+tools/test-client.mjs     77 项检查
 ```
-
-改面板：编辑 `src/panel/template.html`，跑 `node tools/build-panel.mjs`。是 link 安装的话刷新浏览器就生效；只有改 host 侧 `plugin/lib/index.js` 才需要重启 DSH。
 
 ## 验证方式
 
-没有 CI，验证都是脚本跑一次的。开发中实际跑过：
+```sh
+node tools/build-panel.mjs     # 构建（内含产物断言：主题脚本、转义、根节点、版本号）
+node tools/test-client.mjs     # 77 项：文本守卫 + 工厂执行 + 挂载 + 取数 + 保鲜 + 资产重铺
+```
 
-- host 侧真实采集 53 周，与平台页面交叉核对（近一年费用 ¥168.55 对平台累计 ¥167.92，差额是当天还没结算的部分）
-- 无头浏览器走真实插件路径渲染（371 格、7 个 Key、4 个模型、三档切换）
-- 客户端 bundle 结构检查 31 项（含主题四级优先链，用的是宿主真实快照形状）
-- 月份标签对齐：量每个标签与它所在列格子的实际偏差，12 个全为 0px
-- 主题判定：分别用「变量在根元素」「变量在 body」「宿主暗/亮 × 系统暗/亮」等组合验证
-
-一个教训：**只看截图会骗人。** 无头浏览器的 `--virtual-time-budget` 会冻住 CSS 入场动画，截出来的图总是发灰，我因此误判过好几次。改成直接读 `getComputedStyle` 的计算值之后，颜色和对齐都能给出精确数字。
+真机验证走过的路子：无头 Chromium 连 CDP，把真实产物挂进"像 DSH 那样"的宿主（令牌挂在 `body`、`body[data-ds-dark-theme]`、玻璃祖先、真滚动容器、真壁纸条纹），按像素与计算样式判定——面板里的 `backdrop-filter` 是否糊到壁纸、tip 位置是否准确、格子放大环是否被裁、卡片是否透出窗口材质，都是这么量出来的。
 
 ## 借鉴了谁
 
-界面方向和导航图标方案来自 **[zeng6125-rgb/dsh-usage-heatmap](https://github.com/zeng6125-rgb/dsh-usage-heatmap)**（BSD-3-Clause）。它也是把 DSH 用量画成 GitHub 风格热力图，走本地会话日志口径，跟这个插件正好互补——一个回答「DSH 自己花了多少」，一个回答「这个账号一共花了多少」。三档切换的设计和那个 CSS mask 画导航图标的做法，都是照着它的实现学的；`settings.section` 没有 `icon` 字段、第三方分区只能拿齿轮这件事，也是它实测出来的。
-
-主题服务的接法参考了 **dshmarket** 的做法（`inject: ['slots','locale','theme']` + `ctx.theme.getTheme()` + `ctx.on('theme/change')`）。
-
-热力图形态来自 GitHub 的贡献图，「Token 活动」这个标题和整体呈现参考了 Codex 的 `/usage`。
+- 视觉与交互对标 **Codex 的 `/usage`「Token 活动」面板**（52 周热力图、每天/每周/累计、悬停看当天明细、没有图例）
+- 玻璃与壁纸适配参照 **dsh-plugin-wallpaper-engine**（`--we-*` 令牌、`--dsh-alias-bg-layer-*` 的玻璃配方）
+- "原生分区该怎么活"参照 **dshmarket**（不刷底色、直接透出窗口材质）
+- 导航图标补丁的做法来自 **dsh-usage-heatmap** 的实测方案
 
 ## License
 
-[MIT](LICENSE)
+MIT

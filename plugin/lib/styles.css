@@ -1,7 +1,8 @@
 
   :root{
     --bg:#f7f8fb; --card:#ffffff; --line:#e8e6e1; --text:#1f2328; --dim:#6b7280;
-    --l0:#ebedf0; --l1:#c6e48b; --l2:#7bc96f; --l3:#239a3b; --l4:#196127;
+    /* 六档绿梯（亮色）：越用越多越深。按 OKLab 等距排的，相邻档 ΔE ≥0.08，13px 上也分得清 */
+    --l0:#eceff1; --l1:#cdeab4; --l2:#a5dc8c; --l3:#6ec96a; --l4:#3fae52; --l5:#238b41; --l6:#14622f;
     --accent:#4d6bfe;
     /* 玻璃：卡片与浮层共用的乳白底 + 边框 */
     --glass:rgba(255,255,255,.58);
@@ -16,7 +17,8 @@
          不一定等于系统主题；早先只认媒体查询，就会出现「DSH 亮色、面板暗色」的错配） */
   :root[data-theme="dark"]{
     --bg:#16181c; --card:#242629; --line:#34383d; --text:#e8eaed; --dim:#9aa0a6;
-    --l0:#2d3134; --l1:#1a5c38; --l2:#238040; --l3:#35b953; --l4:#4ade63;
+    /* 六档绿梯（暗色）：越用越多越亮，OKLab 等距，相邻档 ΔE ≥0.08 */
+    --l0:#2d3134; --l1:#14512f; --l2:#1e6b3d; --l3:#2a8a4a; --l4:#3cb45c; --l5:#57d873; --l6:#8bf59a;
     --glass:rgba(38,41,46,.55); --glass-strong:rgba(44,47,53,.78);
     --glass-line:rgba(255,255,255,.08); --glass-stroke:rgba(255,255,255,.10);
     --glass-shadow:0 8px 30px rgba(0,0,0,.42), 0 1px 3px rgba(0,0,0,.3);
@@ -25,7 +27,7 @@
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
       --bg:#16181c; --card:#242629; --line:#34383d; --text:#e8eaed; --dim:#9aa0a6;
-      --l0:#2d3134; --l1:#1a5c38; --l2:#238040; --l3:#35b953; --l4:#4ade63;
+      --l0:#2d3134; --l1:#14512f; --l2:#1e6b3d; --l3:#2a8a4a; --l4:#3cb45c; --l5:#57d873; --l6:#8bf59a;
       --glass:rgba(38,41,46,.55); --glass-strong:rgba(44,47,53,.78);
       --glass-line:rgba(255,255,255,.08); --glass-stroke:rgba(255,255,255,.10);
       --glass-shadow:0 8px 30px rgba(0,0,0,.42), 0 1px 3px rgba(0,0,0,.3);
@@ -73,7 +75,21 @@
   .stat .k{color:var(--dim);font-size:12px}
   .stat .v{font-size:22px;font-weight:660;letter-spacing:-.4px;margin-top:2px}
   .stat .v small{font-size:13px;font-weight:500;color:var(--dim);margin-left:3px}
-  .gridbox{overflow-x:auto;padding-bottom:2px}
+  .gridbox{overflow-x:auto;overflow-y:hidden;
+           /* 内边距不是装饰：悬停会把格子放大到 1.55×、再描一圈 1.5px 的环，
+              整个绘制范围比原格子外扩约 5.9px；而滚动容器的裁剪边就是它自己的 padding box。
+              不留这点余量，最下面一行的放大环会被横向滚动条那一条切掉（2026-10-04 用户报的
+              「格子边框边缘被裁」）。横向也留 6px，拉到最右时最后一列同样不被切。 */
+           padding:0 6px 8px 0;
+           /* 滚动条：轨道必须透明。UA 默认用系统 Canvas 色画轨道（暗色下纯黑、亮色下纯白），
+              面板背景在壁纸模式下是透明的，于是这条固定底色会横在热力图下面很扎眼。
+              滑块用中性半透明灰，压在深底/浅底/壁纸上都看得见、也不抢戏。 */
+           scrollbar-width:thin;scrollbar-color:rgba(127,127,127,.55) transparent}
+  .gridbox::-webkit-scrollbar{height:10px;width:10px}
+  .gridbox::-webkit-scrollbar-track,
+  .gridbox::-webkit-scrollbar-corner{background:transparent}
+  .gridbox::-webkit-scrollbar-thumb{background:rgba(127,127,127,.5);border-radius:6px}
+  .gridbox::-webkit-scrollbar-thumb:hover{background:rgba(127,127,127,.72)}
   /* 月份轴：绝对定位，每个标签的 left = 列索引 × 17px（13 格子 + 4 间隙），
      和格子的几何完全一致。以前是一排 span（宽 14px、有文字的改 auto）+ gap:4px，
      每个单元 18px 而格子是 17px，53 列累计漂 53px，到 9 月能偏出 5 个格子。 */
@@ -86,19 +102,39 @@
   .col{display:flex;flex-direction:column;gap:4px}
   .c{width:13px;height:13px;border-radius:3px;background:var(--l0)}
   .c[data-tip]{cursor:pointer}
-  .c.l1{background:var(--l1)} .c.l2{background:var(--l2)} .c.l3{background:var(--l3)} .c.l4{background:var(--l4)}
+  /* 六档：只有 l1..l6。以前这里有 l1..l4 + 一条 "l5 兜底成 l4" —— 档数一改就把 l5 压掉了，
+     所以那条兜底已经删掉：现在 level() 恰好返回 0..6，越界不再可能（顶格返回 LV.length = 6）。 */
+  .c.l1{background:var(--l1)} .c.l2{background:var(--l2)} .c.l3{background:var(--l3)}
+  .c.l4{background:var(--l4)} .c.l5{background:var(--l5)} .c.l6{background:var(--l6)}
+  /* 图例已按用户要求撤掉（"神秘一点"）：档位含义只靠悬停看。
+     ⚠️ 但 .legend 的样式先留着 —— 运行时装资产那条路只换 CSS 不换 HTML，
+     正在跑的旧客户端手里还有那份带图例的旧结构，样式删了它会散成一排裸色块。
+     下一次重启后这份 HTML 就没人用了，届时可以连同这两条规则一起删。 */
   .legend{display:flex;align-items:center;gap:5px;justify-content:flex-end;color:var(--dim);font-size:11.5px;margin-top:10px}
   .legend i{width:13px;height:13px;border-radius:3px;display:inline-block}
+  /* 热力图卡片：图例没了，底部留白跟着收上来（原来 14px 是给图例垫的），
+     现在上下都是 18px（10px 卡片内边距 + 8px 网格容器内边距），视觉对称 */
+  .gridcard{padding-bottom:10px}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  /* 第一列是名字（API Key / 模型），长名字允许换行——数字列保持不换行对齐 */
+  th:first-child,td:first-child{white-space:normal;overflow-wrap:anywhere}
   th{color:var(--dim);font-weight:500;font-size:12px}
   td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
   .bar{height:7px;border-radius:4px;background:var(--accent);opacity:.75;display:inline-block;vertical-align:middle}
   .two{display:grid;grid-template-columns:1fr;gap:16px}
-  @media(min-width:900px){.two{grid-template-columns:1.45fr 1fr}}
+  .two>*{min-width:0}          /* 允许子项收缩，别再顶破容器 */
+  /* 两张拆分表**一律上下排**（先「按 API Key」，再「按模型」）。
+     早先写的是 @media(min-width:900px) 时并排两列 —— 那个 900px 判的是**视口宽度**，
+     而面板在 DSH 设置页里被塞进内容列（列宽比视口窄得多，七八百像素），媒体查询照样命中，
+     于是两张表并排、右边那张被容器裁掉（2026-10-04 用户报的）。
+     表格单元格是 white-space:nowrap，并排所需的最小宽度远大于内容列 ⇒ 只能上下排。
+     （将来若真想在宽屏并排，正确做法是容器查询 @container，而不是媒体查询。） */
   h2{font-size:14px;font-weight:600;margin:0 0 10px}
   /* 悬浮提示：换成乳白玻璃（原来是一块纯黑） */
   #tip{position:fixed;z-index:99;pointer-events:none;font-size:12px;
+       /* popover 进 top layer 时 UA 会塞进 inset:0 + margin:auto，得清掉 */
+       inset:auto;margin:0;
        padding:9px 12px;border-radius:12px;opacity:0;transition:opacity .1s;max-width:300px;line-height:1.55;
        background:var(--glass-strong);color:var(--text);
        border:1px solid var(--glass-line);
