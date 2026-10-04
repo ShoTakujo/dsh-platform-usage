@@ -6,7 +6,11 @@
 
 不是 DeepSeek 官方项目，数据取自官方平台而已。
 
-![平台用量面板](docs/screenshot.png)
+两套主题都跟随宿主，悬停任意格子看当天明细：
+
+| 浅色 | 深色 |
+| --- | --- |
+| ![浅色主题下的平台用量面板](docs/screenshot-light.png) | ![深色主题下的平台用量面板](docs/screenshot-dark.png) |
 
 ## 当前状态
 
