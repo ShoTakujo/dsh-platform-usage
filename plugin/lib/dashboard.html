@@ -81,8 +81,12 @@
            /* 内边距不是装饰：悬停会把格子放大到 1.55×、再描一圈 1.5px 的环，
               整个绘制范围比原格子外扩约 5.9px；而滚动容器的裁剪边就是它自己的 padding box。
               不留这点余量，最下面一行的放大环会被横向滚动条那一条切掉（2026-10-04 用户报的
-              「格子边框边缘被裁」）。横向也留 6px，拉到最右时最后一列同样不被切。 */
-           padding:0 6px 8px 0;
+              「格子边框边缘被裁」）。
+              ⚠️ 横向余量**不能**留在这里：Chromium 把滚动容器的尾部 padding 算进可滚区域，
+              滚到底时内容右边缘正好顶到裁剪边，这点 padding 会被"吃"掉——真机上表现为
+              拉到最右时最后一列仍被切（2026-10-06 用户报的）。所以横向余量挪到内容自身的
+              .cols 上（见下），它属于内容的盒子，滚到底一定留得下。 */
+           padding:0 0 8px;
            /* 滚动条：轨道必须透明。UA 默认用系统 Canvas 色画轨道（暗色下纯黑、亮色下纯白），
               面板背景在壁纸模式下是透明的，于是这条固定底色会横在热力图下面很扎眼。
               滑块用中性半透明灰，压在深底/浅底/壁纸上都看得见、也不抢戏。 */
@@ -100,7 +104,10 @@
   .gridrow{display:flex;align-items:flex-start}
   .wd{display:flex;flex-direction:column;gap:4px;width:27px;flex:0 0 27px}
   .wd span{height:13px;font-size:10px;color:var(--dim);line-height:13px}
-  .cols{display:flex;gap:4px}
+  /* 横向余量（8px）放在内容这一层：属于 .cols 自己的盒子，会被算进可滚内容，
+     滚到最右时最后一列距离裁剪边仍有 8px —— 放大环（外扩 5.9px）也就完整了。
+     如果放在滚动容器（.gridbox）的 padding 上，滚到底会被吃掉（真机实测差 6px）。 */
+  .cols{display:flex;gap:4px;padding-right:8px}
   .col{display:flex;flex-direction:column;gap:4px}
   .c{width:13px;height:13px;border-radius:3px;background:var(--l0)}
   .c[data-tip]{cursor:pointer}
